@@ -23,6 +23,11 @@
 //!                 println!("{:?}", binary.dynstrtab.get_at(need_ver.vna_name));
 //!             }
 //!         }
+//!
+//!         // Alternative in alloc environments.
+//!         for vlib in verneed.versioned_libs(&binary.dynstrtab) {
+//!             println!("Versioned lib: {:?}", vlib);
+//!         }
 //!     }
 //!
 //!     Ok(())
@@ -62,6 +67,8 @@
 use crate::container;
 use crate::elf::section_header::{SectionHeader, SHT_GNU_VERDEF, SHT_GNU_VERNEED, SHT_GNU_VERSYM};
 use crate::error::Result;
+use crate::strtab::Strtab;
+use alloc::vec::Vec;
 use core::iter::FusedIterator;
 use scroll::Pread;
 
@@ -577,6 +584,13 @@ pub struct VerneedSection<'a> {
     ctx: container::Ctx,
 }
 
+/// Descriptor for a library dependency with needed symbol version requirements.
+#[derive(Debug)]
+pub struct VersionedLib<'a> {
+    pub name: &'a str,
+    pub need: Vec<&'a str>,
+}
+
 impl<'a> VerneedSection<'a> {
     /// Try to parse the optional [`SHT_GNU_VERNEED`] section.
     pub fn parse(
@@ -606,6 +620,20 @@ impl<'a> VerneedSection<'a> {
     #[inline]
     pub fn iter(&'a self) -> VerneedIter<'a> {
         self.into_iter()
+    }
+
+    /// Get all library dependencies with with needed symbol version requirements.
+    pub fn versioned_libs(&self, strtab: &Strtab<'a>) -> Vec<VersionedLib<'a>> {
+        self.iter()
+            .filter_map(|verneed| {
+                let name = strtab.get_at(verneed.vn_file)?;
+                let need = verneed
+                    .iter()
+                    .filter_map(|vernaux| strtab.get_at(vernaux.vna_name))
+                    .collect();
+                Some(VersionedLib { name, need })
+            })
+            .collect()
     }
 }
 
