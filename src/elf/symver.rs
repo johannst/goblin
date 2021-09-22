@@ -309,6 +309,47 @@ impl Versym {
     pub fn version(&self) -> u16 {
         self.vs_val & VERSYM_VERSION
     }
+
+    /// Try to find the version string corresponding to this symbol version entry (`self`).
+    pub fn find_version<'a>(
+        &self,
+        verdef: &Option<VerdefSection<'_>>,
+        verneed: &Option<VerneedSection<'_>>,
+        strtab: &Strtab<'a>,
+    ) -> Option<&'a str> {
+        // FIXME: Validate algorithm.
+        //        Today, try to find first match with a valid string. If we find a match
+        //        without a string we keep looking.
+
+        if let Some(ver_str) = verneed.as_ref().and_then(|verneed| {
+            verneed.iter().find_map(|vn| {
+                vn.iter().find_map(|vna| {
+                    if vna.vna_other == self.vs_val {
+                        strtab.get_at(vna.vna_name)
+                    } else {
+                        None
+                    }
+                })
+            })
+        }) {
+            return Some(ver_str);
+        }
+
+        if let Some(ver_str) = verdef.as_ref().and_then(|verdef| {
+            verdef.iter().find_map(|vd| {
+                if vd.vd_ndx == self.vs_val {
+                    let vda0 = vd.iter().next()?;
+                    strtab.get_at(vda0.vda_name)
+                } else {
+                    None
+                }
+            })
+        }) {
+            return Some(ver_str);
+        }
+
+        None
+    }
 }
 
 impl From<ElfVersym> for Versym {
