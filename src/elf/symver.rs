@@ -278,7 +278,7 @@ impl FusedIterator for VersymIter<'_> {}
 /// An ELF [Symbol Version][lsb-versym] entry.
 ///
 /// [lsb-versym]: https://refspecs.linuxbase.org/LSB_5.0.0/LSB-Core-generic/LSB-Core-generic/symversion.html#SYMVERTBL
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Versym {
     pub vs_val: u16,
 }
@@ -308,47 +308,6 @@ impl Versym {
     #[inline]
     pub fn version(&self) -> u16 {
         self.vs_val & VERSYM_VERSION
-    }
-
-    /// Try to find the version string corresponding to this symbol version entry (`self`).
-    pub fn find_version<'a>(
-        &self,
-        verdef: &Option<VerdefSection<'_>>,
-        verneed: &Option<VerneedSection<'_>>,
-        strtab: &Strtab<'a>,
-    ) -> Option<&'a str> {
-        // FIXME: Validate algorithm.
-        //        Today, try to find first match with a valid string. If we find a match
-        //        without a string we keep looking.
-
-        if let Some(ver_str) = verneed.as_ref().and_then(|verneed| {
-            verneed.iter().find_map(|vn| {
-                vn.iter().find_map(|vna| {
-                    if vna.vna_other == self.vs_val {
-                        strtab.get_at(vna.vna_name)
-                    } else {
-                        None
-                    }
-                })
-            })
-        }) {
-            return Some(ver_str);
-        }
-
-        if let Some(ver_str) = verdef.as_ref().and_then(|verdef| {
-            verdef.iter().find_map(|vd| {
-                if vd.vd_ndx == self.vs_val {
-                    let vda0 = vd.iter().next()?;
-                    strtab.get_at(vda0.vda_name)
-                } else {
-                    None
-                }
-            })
-        }) {
-            return Some(ver_str);
-        }
-
-        None
     }
 }
 
@@ -400,6 +359,18 @@ impl<'a> VerdefSection<'a> {
     #[inline]
     pub fn iter(&'a self) -> VerdefIter<'a> {
         self.into_iter()
+    }
+
+    /// Try to find the version string corresponding to `versym` in the `VerdefSection`.
+    pub fn find_version<'s>(&self, versym: Versym, strtab: &Strtab<'s>) -> Option<&'s str> {
+        self.iter().find_map(|vd| {
+            if !versym.is_local() && !versym.is_global() && vd.vd_ndx == versym.version() {
+                let vda0 = vd.iter().next()?;
+                strtab.get_at(vda0.vda_name)
+            } else {
+                None
+            }
+        })
     }
 }
 
@@ -675,6 +646,19 @@ impl<'a> VerneedSection<'a> {
                 Some(VersionedLib { name, need })
             })
             .collect()
+    }
+
+    /// Try to find the version string corresponding to `versym` in the `VerneedSection`.
+    pub fn find_version<'s>(&self, versym: Versym, strtab: &Strtab<'s>) -> Option<&'s str> {
+        self.iter().find_map(|vn| {
+            vn.iter().find_map(|vna| {
+                if !versym.is_local() && !versym.is_global() && vna.vna_other == versym.version() {
+                    strtab.get_at(vna.vna_name)
+                } else {
+                    None
+                }
+            })
+        })
     }
 }
 
